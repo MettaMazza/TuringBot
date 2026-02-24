@@ -304,11 +304,16 @@ class Brain:
                 model=self.model,
                 messages=self.history,
                 tools=TOOL_DEFINITIONS,
+                think=True,
             )
 
             msg = response.message
-            # Add assistant response to history
-            self.history.append(msg.model_dump())
+            # Build history entry preserving all fields (including thinking
+            # for Gemini 3 thought_signature compatibility)
+            history_entry = msg.model_dump()
+            if msg.thinking:
+                history_entry["thinking"] = msg.thinking
+            self.history.append(history_entry)
 
             # Check for tool calls
             if not msg.tool_calls:
