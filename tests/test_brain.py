@@ -185,157 +185,77 @@ class TestBrainHistory:
 
 class TestBrainThink:
     @pytest.mark.asyncio
-    async def test_simple_response(self, brain, mock_ollama_client):
+    async def test_simple_response(self, brain):
         """Test a simple text response with no tool calls."""
-        mock_msg = MagicMock()
-        mock_msg.content = "Hello, I am thinking."
-        mock_msg.tool_calls = None
-        mock_msg.model_dump.return_value = {
-            "role": "assistant",
-            "content": "Hello, I am thinking.",
-        }
-
-        mock_response = MagicMock()
-        mock_response.message = mock_msg
-        mock_ollama_client.chat.return_value = mock_response
-
-        text, tool_log = await brain.think("System prompt", "User message")
+        raw = {"message": {"role": "assistant", "content": "Hello, I am thinking."}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            text, tool_log = await brain.think("System prompt", "User message")
         assert text == "Hello, I am thinking."
         assert tool_log == []
-        mock_ollama_client.chat.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_response_with_tool_call(self, brain, mock_ollama_client):
+    async def test_response_with_tool_call(self, brain):
         """Test response that includes a tool call followed by final text."""
-        # First call: model wants to use tape_read
-        mock_tool_call = MagicMock()
-        mock_tool_call.function.name = "tape_read"
-        mock_tool_call.function.arguments = {}
-
-        mock_msg1 = MagicMock()
-        mock_msg1.content = ""
-        mock_msg1.tool_calls = [mock_tool_call]
-        mock_msg1.model_dump.return_value = {
-            "role": "assistant",
-            "content": "",
+        raw1 = {"message": {
+            "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": "tape_read", "arguments": {}}}],
-        }
-
-        # Second call: model returns final text
-        mock_msg2 = MagicMock()
-        mock_msg2.content = "The cell is empty."
-        mock_msg2.tool_calls = None
-        mock_msg2.model_dump.return_value = {
-            "role": "assistant",
-            "content": "The cell is empty.",
-        }
-
-        mock_resp1 = MagicMock()
-        mock_resp1.message = mock_msg1
-        mock_resp2 = MagicMock()
-        mock_resp2.message = mock_msg2
-
-        mock_ollama_client.chat.side_effect = [mock_resp1, mock_resp2]
-
-        text, tool_log = await brain.think("System", "Read the tape")
+        }}
+        raw2 = {"message": {"role": "assistant", "content": "The cell is empty."}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, side_effect=[raw1, raw2]):
+            text, tool_log = await brain.think("System", "Read the tape")
         assert text == "The cell is empty."
         assert len(tool_log) == 1
         assert tool_log[0]["tool"] == "tape_read"
 
     @pytest.mark.asyncio
-    async def test_system_prompt_updated(self, brain, mock_ollama_client):
+    async def test_system_prompt_updated(self, brain):
         """Test that system prompt is set/updated on each call."""
-        mock_msg = MagicMock()
-        mock_msg.content = "ok"
-        mock_msg.tool_calls = None
-        mock_msg.model_dump.return_value = {"role": "assistant", "content": "ok"}
-        mock_resp = MagicMock()
-        mock_resp.message = mock_msg
-        mock_ollama_client.chat.return_value = mock_resp
-
-        await brain.think("First prompt", "msg1")
+        raw = {"message": {"role": "assistant", "content": "ok"}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            await brain.think("First prompt", "msg1")
         assert brain.history[0]["content"] == "First prompt"
 
-        await brain.think("Second prompt", "msg2")
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            await brain.think("Second prompt", "msg2")
         assert brain.history[0]["content"] == "Second prompt"
 
     @pytest.mark.asyncio
-    async def test_max_tool_rounds(self, brain, mock_ollama_client):
+    async def test_max_tool_rounds(self, brain):
         """Test that max tool rounds limits infinite tool-call loops."""
-        mock_tool_call = MagicMock()
-        mock_tool_call.function.name = "tape_status"
-        mock_tool_call.function.arguments = {}
-
-        mock_msg = MagicMock()
-        mock_msg.content = ""
-        mock_msg.tool_calls = [mock_tool_call]
-        mock_msg.model_dump.return_value = {
-            "role": "assistant",
-            "content": "",
+        raw = {"message": {
+            "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": "tape_status", "arguments": {}}}],
-        }
-        mock_resp = MagicMock()
-        mock_resp.message = mock_msg
-        mock_ollama_client.chat.return_value = mock_resp
-
-        text, tool_log = await brain.think("System", "Loop forever")
+        }}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            text, tool_log = await brain.think("System", "Loop forever")
         assert "max tool-call depth" in text
-        assert len(tool_log) == 10  # Default max rounds
+        assert len(tool_log) == 10
 
     @pytest.mark.asyncio
-    async def test_empty_response(self, brain, mock_ollama_client):
+    async def test_empty_response(self, brain):
         """Test handling of empty content from model."""
-        mock_msg = MagicMock()
-        mock_msg.content = ""
-        mock_msg.tool_calls = None
-        mock_msg.model_dump.return_value = {"role": "assistant", "content": ""}
-        mock_resp = MagicMock()
-        mock_resp.message = mock_msg
-        mock_ollama_client.chat.return_value = mock_resp
-
-        text, tool_log = await brain.think("System", "msg")
+        raw = {"message": {"role": "assistant", "content": ""}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            text, tool_log = await brain.think("System", "msg")
         assert text == ""
 
     @pytest.mark.asyncio
-    async def test_none_content_response(self, brain, mock_ollama_client):
+    async def test_none_content_response(self, brain):
         """Test handling of None content from model."""
-        mock_msg = MagicMock()
-        mock_msg.content = None
-        mock_msg.tool_calls = None
-        mock_msg.model_dump.return_value = {"role": "assistant", "content": None}
-        mock_resp = MagicMock()
-        mock_resp.message = mock_msg
-        mock_ollama_client.chat.return_value = mock_resp
-
-        text, tool_log = await brain.think("System", "msg")
+        raw = {"message": {"role": "assistant", "content": None}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, return_value=raw):
+            text, tool_log = await brain.think("System", "msg")
         assert text == ""
 
     @pytest.mark.asyncio
-    async def test_tool_call_with_no_arguments(self, brain, mock_ollama_client):
+    async def test_tool_call_with_no_arguments(self, brain):
         """Test tool call where arguments is None."""
-        mock_tool_call = MagicMock()
-        mock_tool_call.function.name = "tape_read"
-        mock_tool_call.function.arguments = None
-
-        mock_msg1 = MagicMock()
-        mock_msg1.content = ""
-        mock_msg1.tool_calls = [mock_tool_call]
-        mock_msg1.model_dump.return_value = {
+        raw1 = {"message": {
             "role": "assistant", "content": "",
             "tool_calls": [{"function": {"name": "tape_read", "arguments": None}}],
-        }
-
-        mock_msg2 = MagicMock()
-        mock_msg2.content = "Done"
-        mock_msg2.tool_calls = None
-        mock_msg2.model_dump.return_value = {"role": "assistant", "content": "Done"}
-
-        mock_resp1 = MagicMock()
-        mock_resp1.message = mock_msg1
-        mock_resp2 = MagicMock()
-        mock_resp2.message = mock_msg2
-        mock_ollama_client.chat.side_effect = [mock_resp1, mock_resp2]
-
-        text, tool_log = await brain.think("System", "msg")
+        }}
+        raw2 = {"message": {"role": "assistant", "content": "Done"}}
+        with patch.object(brain, "_raw_chat", new_callable=AsyncMock, side_effect=[raw1, raw2]):
+            text, tool_log = await brain.think("System", "msg")
         assert text == "Done"
         assert len(tool_log) == 1

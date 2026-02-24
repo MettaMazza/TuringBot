@@ -271,8 +271,30 @@ class Brain:
     def _trim_history(self) -> None:
         """Keep history within the max length, preserving the system message."""
         if len(self.history) > self.max_history:
-            # Always keep the first message (system prompt)
             self.history = self.history[:1] + self.history[-(self.max_history - 1):]
+
+    async def _raw_chat(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Make a raw HTTP chat request to Ollama, bypassing the SDK's message
+        serialization which strips unknown fields like thought_signature.
+        """
+        import httpx
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "tools": TOOL_DEFINITIONS,
+            "think": True,
+            "stream": False,
+        }
+        async with httpx.AsyncClient(timeout=300.0) as http:
+            resp = await http.post(
+                f"{self.host}/api/chat",
+                json=payload,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(resp.text)
+            return resp.json()
 
     async def think(
         self,
@@ -300,30 +322,25 @@ class Brain:
         max_tool_rounds = 10  # Safety limit on chained tool calls
 
         for _ in range(max_tool_rounds):
-            response = await self._client.chat(
-                model=self.model,
-                messages=self.history,
-                tools=TOOL_DEFINITIONS,
-                think=True,
-            )
+            # Use raw HTTP to preserve thought_signature for Gemini 3
+            raw_response = await self._raw_chat(self.history)
 
-            msg = response.message
-            # Build history entry preserving all fields (including thinking
-            # for Gemini 3 thought_signature compatibility)
-            history_entry = msg.model_dump()
-            if msg.thinking:
-                history_entry["thinking"] = msg.thinking
-            self.history.append(history_entry)
+            # The raw response has the full message with all fields intact
+            raw_msg = raw_response.get("message", {})
+
+            # Append the FULL raw message to history (preserves thought_signature)
+            self.history.append(raw_msg)
 
             # Check for tool calls
-            if not msg.tool_calls:
-                return msg.content or "", tool_log
+            tool_calls = raw_msg.get("tool_calls")
+            if not tool_calls:
+                return raw_msg.get("content") or "", tool_log
 
             # Process each tool call
-            for tool_call in msg.tool_calls:
-                fn = tool_call.function
-                tool_name = fn.name
-                tool_args = fn.arguments if fn.arguments else {}
+            for tool_call in tool_calls:
+                fn = tool_call.get("function", {})
+                tool_name = fn.get("name", "")
+                tool_args = fn.get("arguments") or {}
                 logger.info(f"Tool call: {tool_name}({tool_args})")
                 result = self._dispatch_tool(tool_name, tool_args)
                 logger.info(f"Tool result: {result[:200]}")

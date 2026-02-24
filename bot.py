@@ -114,6 +114,10 @@ class TuringBot(discord.Client):
         if message.channel.id != self.listen_channel_id:
             return
 
+        # Ignore embed-only messages (link previews, bot cards, etc.)
+        if not message.content and message.embeds:
+            return
+
         logger.info(f"Message from {message.author}: {message.content}")
 
         # Pause heartbeat during response
