@@ -284,10 +284,13 @@ class Brain:
             "model": self.model,
             "messages": messages,
             "tools": TOOL_DEFINITIONS,
-            "think": True,
             "stream": False,
+            "options": {
+                "temperature": 0.0,
+                "num_ctx": 32768,
+            }
         }
-        async with httpx.AsyncClient(timeout=300.0) as http:
+        async with httpx.AsyncClient(timeout=None) as http:
             resp = await http.post(
                 f"{self.host}/api/chat",
                 json=payload,
