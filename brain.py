@@ -352,6 +352,7 @@ class Brain:
                 # Feed result back as a tool message
                 self.history.append({
                     "role": "tool",
+                    "name": tool_name,
                     "content": result,
                 })
 
